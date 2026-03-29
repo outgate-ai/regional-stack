@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "baseUrl": "../../",
+    "paths": {
+      "@outgate/shared": ["packages/shared/src"],
+      "@outgate/shared/*": ["packages/shared/src/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "src/scripts/**/*", "**/*.test.ts", "**/__tests__/**"]
+}

@@ -1,0 +1,9 @@
+{
+  "name": "outgate-regional-stack",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "services/*",
+    "packages/*"
+  ]
+}

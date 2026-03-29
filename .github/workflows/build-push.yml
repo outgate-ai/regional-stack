@@ -1,0 +1,81 @@
+name: Build and Push Images
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ECR_PREFIX: public.ecr.aws/s0x2o1c6
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - service: region-agent
+            dockerfile: region-agent/Dockerfile
+            context: ./region-agent
+            ecr_repo: outgate-region-agent
+          - service: log-manager
+            dockerfile: services/log-manager/Dockerfile
+            context: .
+            ecr_repo: outgate-log-manager
+          - service: guardrail
+            dockerfile: services/guardrail/Dockerfile
+            context: .
+            ecr_repo: outgate-guardrail
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Login to ECR Public
+        run: |
+          aws ecr-public get-login-password --region us-east-1 | \
+            docker login --username AWS --password-stdin public.ecr.aws
+
+      - name: Determine tags
+        id: tags
+        run: |
+          REPO="${{ env.ECR_PREFIX }}/${{ matrix.ecr_repo }}"
+          SHA_TAG="${REPO}:${{ github.sha }}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            ENV_TAG="${REPO}:latest"
+            echo "env_label=prod" >> "$GITHUB_OUTPUT"
+          else
+            ENV_TAG="${REPO}:dev"
+            echo "env_label=dev" >> "$GITHUB_OUTPUT"
+          fi
+          echo "tags=${ENV_TAG},${SHA_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          platforms: linux/amd64
+
+      - name: Summary
+        run: |
+          echo "## ${{ matrix.service }} (${{ steps.tags.outputs.env_label }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`${{ steps.tags.outputs.tags }}\`" >> "$GITHUB_STEP_SUMMARY"

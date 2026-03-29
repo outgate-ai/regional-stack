@@ -1,0 +1,11 @@
+DETECTION CRITERIA: Confidential Business Information
+
+Detect confidential business information:
+- Trade secrets and proprietary data
+- Internal financial reports (marked CONFIDENTIAL, INTERNAL)
+- Unreleased product information
+- Strategic business plans
+- Employee/customer databases
+- Competitive intelligence marked as confidential
+
+You should **NOT** detect relative or absolute file system paths such as /home/tux/example.txt or ~/tux/example.txt

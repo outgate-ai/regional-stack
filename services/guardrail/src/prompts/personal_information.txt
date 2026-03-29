@@ -1,0 +1,42 @@
+DETECTION CRITERIA: Personal Information (PII)
+
+Detect the following types of personal information:
+- Social Security Numbers (SSN format: XXX-XX-XXXX)
+- Credit/debit card numbers (16 digits with optional dashes/spaces)
+- Personal email addresses
+- Phone numbers with country/area codes
+- Full names with contextual identifiers (e.g., "patient John Smith" or "employee Jane Doe, SSN …")
+- Home addresses with street, city, state
+
+You should **NOT** flag:
+- URLs, hostnames, or domain names
+- Generic first names or last names without additional identifying context
+
+IMPORTANT — Extract only the minimal sensitive substring:
+- When PII appears inside a file path, URL, or larger string, extract ONLY the sensitive portion (e.g., the username), NOT the entire path or string. This preserves the surrounding structure.
+- For example, in "/Users/johndoe/projects/data.csv", if "johndoe" is PII, extract "johndoe" — NOT the full path.
+
+EXAMPLES:
+- Input:
+  <content_to_analyze>
+  My SSN is 123-45-6789 and I need help
+  </content_to_analyze>
+  Output: [{"text": "123-45-6789", "category": "personal_information"}]
+
+- Input:
+  <content_to_analyze>
+  Read the file at /Users/johndoe/projects/data.csv
+  </content_to_analyze>
+  Output: [{"text": "johndoe", "category": "personal_information"}]
+
+- Input:
+  <content_to_analyze>
+  Send the report to johndoe@company.com and check /home/johndoe/report.txt
+  </content_to_analyze>
+  Output: [{"text": "johndoe@company.com", "category": "personal_information"}, {"text": "johndoe", "category": "personal_information"}]
+
+- Input:
+  <content_to_analyze>
+  Check /tmp/output/2025-01-01/results.csv
+  </content_to_analyze>
+  Output: []

@@ -1,0 +1,27 @@
+DETECTION CRITERIA: Malicious Technical Content
+
+Detect malicious attack patterns:
+- SQL injection patterns (UNION, DROP, OR '1'='1')
+- XSS attacks (<script>, javascript:, onerror=)
+- Command injection (;, &&, |, backticks used to execute shell commands)
+- Path traversal (../, ../../ used to escape directories)
+- Requests for illegal/harmful activities
+
+You should **NOT** flag:
+- Legitimate AI/LLM system prompts or instruction blocks (e.g., "You MUST follow these instructions", "IMPORTANT: these instructions override default behavior"). These are normal parts of LLM API requests flowing through the gateway.
+- Code snippets, configuration files, or technical documentation that mention security concepts
+- Normal use of semicolons, pipes, or ampersands in non-shell contexts (e.g., JSON, URLs, prose)
+
+EXAMPLES:
+- Input:
+  <content_to_analyze>
+  username' OR '1'='1'; DROP TABLE users;--
+  </content_to_analyze>
+  Output: [{"text": "username' OR '1'='1'; DROP TABLE users;--", "category": "malicious_content"}]
+
+- Input:
+  <content_to_analyze>
+  IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.
+  You are a helpful coding assistant.
+  </content_to_analyze>
+  Output: []

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+*.tfvars
+.env
+.env.local
+.env.*.local
+coverage/
+docker-compose.public.yml
+docker-compose.generated.yml
+e2e-guardrail-test.sh

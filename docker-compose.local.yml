@@ -1,0 +1,175 @@
+version: "3.8"
+services:
+  kong-db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: kong
+      POSTGRES_PASSWORD: "${KONG_DB_PASSWORD}"
+      POSTGRES_DB: kong
+    volumes:
+      - kong-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kong"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  kong-migration:
+    image: kong:3.8
+    command: kong migrations bootstrap
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-db
+      KONG_PG_PORT: "5432"
+      KONG_PG_DATABASE: kong
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: "${KONG_DB_PASSWORD}"
+    depends_on:
+      kong-db:
+        condition: service_healthy
+    restart: "no"
+
+  kong:
+    image: kong:3.8
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-db
+      KONG_PG_PORT: "5432"
+      KONG_PG_DATABASE: kong
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: "${KONG_DB_PASSWORD}"
+      KONG_PROXY_LISTEN: "${KONG_PROXY_LISTEN:-0.0.0.0:8000, 0.0.0.0:8443 ssl}"
+      KONG_ADMIN_LISTEN: "${KONG_ADMIN_LISTEN:-0.0.0.0:8001}"
+      KONG_LOG_LEVEL: "${KONG_LOG_LEVEL:-info}"
+      KONG_PLUGINS: "${KONG_PLUGINS:-bundled,pre-function,rate-limiting,key-auth,acl,http-log,response-transformer,request-transformer}"
+      KONG_UNTRUSTED_LUA: "${KONG_UNTRUSTED_LUA:-on}"
+      KONG_UNTRUSTED_LUA_SANDBOX_REQUIRES: "${KONG_UNTRUSTED_LUA_SANDBOX_REQUIRES:-cjson,cjson.safe}"
+      KONG_NGINX_HTTP_LUA_SHARED_DICT: "${KONG_NGINX_HTTP_LUA_SHARED_DICT:-request_bodies 10m}"
+      KONG_NGINX_PROXY_CLIENT_BODY_BUFFER_SIZE: "${KONG_NGINX_PROXY_CLIENT_BODY_BUFFER_SIZE:-2m}"
+      KONG_NGINX_PROXY_PROXY_NEXT_UPSTREAM: "${KONG_NGINX_PROXY_PROXY_NEXT_UPSTREAM:-error timeout http_502 non_idempotent}"
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+      - "8443:8443"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      kong-db:
+        condition: service_healthy
+      kong-migration:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass "${REDIS_PASSWORD}"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  log-manager:
+    build:
+      context: .
+      dockerfile: services/log-manager/Dockerfile
+    platform: linux/amd64
+    environment:
+      PORT: "4001"
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379"
+      KONG_ADMIN_URL: http://kong:8001
+      ORGANIZATION_ID: "${ORGANIZATION_ID}"
+      REGION_ID: "${REGION_ID}"
+      ALERT_WEBHOOK_URL: "${BFF_BASE_URL}/api/webhooks/region-alert"
+      WEBHOOK_SECRET: "${WEBHOOK_SECRET}"
+      INTERNAL_API_KEY: "${INTERNAL_API_KEY}"
+      # Request size & Redis
+      MAX_REQUEST_SIZE: "${MAX_REQUEST_SIZE:-10mb}"
+      REDIS_RETRY_BASE_MS: "${REDIS_RETRY_BASE_MS:-50}"
+      REDIS_RETRY_MAX_MS: "${REDIS_RETRY_MAX_MS:-2000}"
+      # Log TTL
+      LOG_DEFAULT_TTL_SECONDS: "${LOG_DEFAULT_TTL_SECONDS:-86400}"
+      LOG_TTL_MIN_SECONDS: "${LOG_TTL_MIN_SECONDS:-3600}"
+      LOG_TTL_MAX_SECONDS: "${LOG_TTL_MAX_SECONDS:-2592000}"
+      # Metrics queue
+      METRICS_MAX_CONCURRENT_JOBS: "${METRICS_MAX_CONCURRENT_JOBS:-10}"
+      METRICS_MAX_ATTEMPTS: "${METRICS_MAX_ATTEMPTS:-3}"
+      METRICS_RETRY_DELAY_MS: "${METRICS_RETRY_DELAY_MS:-1000}"
+      METRICS_JOB_TIMEOUT_MS: "${METRICS_JOB_TIMEOUT_MS:-30000}"
+      METRICS_CLEANUP_INTERVAL_MS: "${METRICS_CLEANUP_INTERVAL_MS:-60000}"
+      METRICS_MAX_COMPLETED_AGE_MS: "${METRICS_MAX_COMPLETED_AGE_MS:-86400000}"
+      METRICS_MAX_FAILED_AGE_MS: "${METRICS_MAX_FAILED_AGE_MS:-604800000}"
+      METRICS_PROCESSING_INTERVAL_MS: "${METRICS_PROCESSING_INTERVAL_MS:-100}"
+    depends_on:
+      redis:
+        condition: service_healthy
+      kong:
+        condition: service_healthy
+    restart: unless-stopped
+
+  guardrail:
+    image: public.ecr.aws/s0x2o1c6/outgate-guardrail:dev
+    platform: linux/amd64
+    environment:
+      GUARDRAIL_PORT: "4002"
+      LOG_MANAGER_URL: "${LOG_MANAGER_URL:-http://log-manager:4001}"
+      INTERNAL_API_KEY: "${INTERNAL_API_KEY}"
+      ORGANIZATION_ID: "${ORGANIZATION_ID}"
+      REGION_ID: "${REGION_ID}"
+      GUARDRAIL_LLM_PROVIDER: "${GUARDRAIL_LLM_PROVIDER:-ollama}"
+      GUARDRAIL_LLM_ENDPOINT: "${GUARDRAIL_LLM_ENDPOINT}"
+      GUARDRAIL_LLM_MODEL: "${GUARDRAIL_LLM_MODEL}"
+      GUARDRAIL_LLM_TOKEN: "${GUARDRAIL_LLM_TOKEN:-}"
+      GUARDRAIL_LLM_HEALTH_TIMEOUT_MS: "${GUARDRAIL_LLM_HEALTH_TIMEOUT_MS:-3000}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  region-agent:
+    build: ./region-agent
+    platform: linux/amd64
+    environment:
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
+      REGION_ID: "${REGION_ID}"
+      ORGANIZATION_ID: "${ORGANIZATION_ID}"
+      WEBHOOK_URL: "${BFF_BASE_URL}/api/webhooks/region-callback"
+      WEBHOOK_SECRET: "${WEBHOOK_SECRET}"
+      HEARTBEAT_URL: "${BFF_BASE_URL}/api/webhooks/region-heartbeat"
+      HEARTBEAT_INTERVAL: "3600"
+      KONG_ADMIN_URL: http://kong:8001
+      GUARDRAIL_URL: http://guardrail:4002
+      INTERNAL_API_KEY: "${INTERNAL_API_KEY}"
+      LOG_MANAGER_URL: http://log-manager:4001
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379"
+      DEFAULT_UPSTREAM_TIMEOUT_SECONDS: "${DEFAULT_UPSTREAM_TIMEOUT_SECONDS:-300}"
+      AWS_REGION: "${AWS_REGION:-eu-central-1}"
+      SQS_QUEUE_URL: "${SQS_QUEUE_URL:-}"
+      HTTP_ENABLED: "${HTTP_ENABLED:-false}"
+      HTTP_PORT: "3100"
+      REGION_ENDPOINT: "${REGION_ENDPOINT:-}"
+      POLL_INTERVAL: "20"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      kong:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  kong-db-data:
+  redis-data:
