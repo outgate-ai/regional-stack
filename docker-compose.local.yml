@@ -117,7 +117,7 @@ services:
     restart: unless-stopped
 
   guardrail:
-    image: public.ecr.aws/s0x2o1c6/outgate-guardrail:dev
+    image: public.ecr.aws/v6k2g8e3/outgate-guardrail:dev
     platform: linux/amd64
     environment:
       GUARDRAIL_PORT: "4002"

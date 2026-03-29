@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 env:
-  ECR_PREFIX: public.ecr.aws/s0x2o1c6
+  ECR_PREFIX: public.ecr.aws/v6k2g8e3
 
 jobs:
   build-and-push:
