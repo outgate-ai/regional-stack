@@ -11,12 +11,10 @@ permissions:
   id-token: write
   contents: read
 
-env:
-  ECR_PREFIX: public.ecr.aws/v6k2g8e3
-
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'prod' || 'dev' }}
     strategy:
       matrix:
         include:
@@ -53,16 +51,18 @@ jobs:
       - name: Determine tags
         id: tags
         run: |
-          REPO="${{ env.ECR_PREFIX }}/${{ matrix.ecr_repo }}"
-          SHA_TAG="${REPO}:${{ github.sha }}"
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            ENV_TAG="${REPO}:latest"
-            echo "env_label=prod" >> "$GITHUB_OUTPUT"
+            ECR_PREFIX="public.ecr.aws/f9n7h3c5"
+            TAG="latest"
+            ENV_LABEL="prod"
           else
-            ENV_TAG="${REPO}:dev"
-            echo "env_label=dev" >> "$GITHUB_OUTPUT"
+            ECR_PREFIX="public.ecr.aws/v6k2g8e3"
+            TAG="dev"
+            ENV_LABEL="dev"
           fi
-          echo "tags=${ENV_TAG},${SHA_TAG}" >> "$GITHUB_OUTPUT"
+          REPO="${ECR_PREFIX}/${{ matrix.ecr_repo }}"
+          echo "tags=${REPO}:${TAG},${REPO}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "env_label=${ENV_LABEL}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v5
