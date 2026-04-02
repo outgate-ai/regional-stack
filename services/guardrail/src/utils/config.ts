@@ -4,6 +4,7 @@ export interface GuardrailConfig {
   maxRequestSize: string;
   healthCheckLLM: boolean;
   logManagerUrl: string;
+  redisUrl: string;
   llmHealthTimeoutMs: number;
   llm: {
     provider: 'openai' | 'ollama';
@@ -22,6 +23,7 @@ export const config: GuardrailConfig = {
   maxRequestSize: process.env.GUARDRAIL_MAX_REQUEST_SIZE || '10mb',
   healthCheckLLM: process.env.GUARDRAIL_HEALTH_CHECK_LLM === 'true',
   logManagerUrl: process.env.LOG_MANAGER_URL || 'http://log-manager:4001',
+  redisUrl: process.env.REDIS_URL || '',
   llmHealthTimeoutMs: parseInt(process.env.GUARDRAIL_LLM_HEALTH_TIMEOUT_MS || '3000'),
   llm: {
     provider: (process.env.GUARDRAIL_LLM_PROVIDER as 'openai' | 'ollama') || 'ollama',

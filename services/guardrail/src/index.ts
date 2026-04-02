@@ -4,8 +4,10 @@ import helmet from 'helmet';
 import pino from 'pino';
 import { validateRoutes } from './routes/validate';
 import { healthRoutes } from './routes/health';
+import { vaultRoutes } from './routes/vault';
 import { errorHandler } from './middleware/error';
 import { config, validateConfig } from './utils/config';
+import { initFingerprintStore } from './services/fingerprintStore';
 
 // Validate configuration on startup
 try {
@@ -16,6 +18,13 @@ try {
     error instanceof Error ? error.message : 'Unknown error'
   );
   process.exit(1);
+}
+
+// Initialize fingerprint store (Redis KV for detection caching)
+if (config.redisUrl) {
+  initFingerprintStore(config.redisUrl);
+} else {
+  console.warn('[fingerprint-store] REDIS_URL not set — fingerprint store disabled');
 }
 
 const app = express();
@@ -29,6 +38,7 @@ app.use(express.json({ limit: config.maxRequestSize }));
 // Routes
 app.use('/validate', validateRoutes(logger));
 app.use('/health', healthRoutes(logger));
+app.use('/vault', vaultRoutes(logger));
 
 // Root endpoint
 app.get('/', (req, res) => {

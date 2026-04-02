@@ -14,6 +14,7 @@ import {
   SeverityLevel,
 } from '../types/riskConfig';
 import { config as appConfig } from '../utils/config';
+import { storeDetections, recordScanMetrics } from './fingerprintStore';
 
 export class ValidationService {
   private logger: Logger;
@@ -300,6 +301,21 @@ export class ValidationService {
             },
             'Failed to log non-blocking detection'
           );
+        }
+      }
+
+      // Store detections in fingerprint KV store (fire-and-forget)
+      if (allDetections.length > 0) {
+        const orgId = (request.headers?.['x-organization-id'] as string) || organizationId || '';
+        if (orgId) {
+          storeDetections(orgId, allDetections, result.anonymization_map, 'llm')
+            .then((count) => {
+              if (count > 0) this.logger.debug({ orgId, stored: count }, 'Fingerprints stored');
+            })
+            .catch((err) => {
+              this.logger.warn({ error: err.message }, 'Failed to store fingerprints');
+            });
+          recordScanMetrics(orgId, 0, allDetections.length).catch(() => {});
         }
       }
 

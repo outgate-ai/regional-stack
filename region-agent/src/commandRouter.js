@@ -28,6 +28,7 @@ import { aclBackfill } from './commands/aclBackfill.js';
 import { routerCreate } from './commands/routerCreate.js';
 import { routerUpdate } from './commands/routerUpdate.js';
 import { routerDelete } from './commands/routerDelete.js';
+import { vaultStats, vaultList, vaultDelete } from './commands/vaultQuery.js';
 
 const handlers = {
   PROVIDER_CREATE: providerCreate,
@@ -57,6 +58,9 @@ const handlers = {
   ROUTER_CREATE: routerCreate,
   ROUTER_UPDATE: routerUpdate,
   ROUTER_DELETE: routerDelete,
+  VAULT_STATS: vaultStats,
+  VAULT_LIST: vaultList,
+  VAULT_DELETE: vaultDelete,
 };
 
 /**
