@@ -36,11 +36,10 @@ export async function vaultStats(command) {
 
 export async function vaultList(command) {
   const orgId = command.organizationId;
-  const { page = 1, limit = 50, category, source } = command.payload || {};
+  const { page = 1, limit = 50, category } = command.payload || {};
 
   const params = new URLSearchParams({ organizationId: orgId, page: String(page), limit: String(limit) });
   if (category) params.set('category', category);
-  if (source) params.set('source', source);
 
   const data = await queryGuardrailVault(`/vault/detections?${params}`);
   return { ...data, providerId: 'system' };

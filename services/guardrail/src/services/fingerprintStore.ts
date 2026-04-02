@@ -14,19 +14,16 @@ import Redis from 'ioredis';
 import { Detection } from '../types/riskConfig';
 
 export interface FingerprintEntry {
-  token: string;       // anonymization replacement e.g. "[CRED_1]"
-  type: string;        // detection category
-  words: number;       // word count for n-gram optimization
-  score: number;       // confidence from LLM
-  source: 'llm' | 'cli';
+  type: string;        // detection category (credential, personal_information, etc.)
+  tokenCount: number;  // number of whitespace-delimited tokens that produce this hash
   value?: string;      // plaintext — only in debug mode
   createdAt: string;
+  lastSeenAt: string;
 }
 
 export interface VaultStats {
   totalFingerprints: number;
   storageMode: 'strict' | 'debug';
-  storageBytes: number;
   totalLookups: number;
   totalHits: number;
   totalMisses: number;
@@ -89,34 +86,34 @@ export async function storeDetections(
   orgId: string,
   detections: Detection[],
   anonymizationMap?: Array<[string, string]>,
-  source: 'llm' | 'cli' = 'llm',
 ): Promise<number> {
   if (!redis || detections.length === 0) return 0;
-
-  // Build a lookup from original text → anonymization token
-  const tokenMap = new Map<string, string>();
-  if (anonymizationMap) {
-    for (const [original, token] of anonymizationMap) {
-      tokenMap.set(normalize(original), token);
-    }
-  }
 
   const pipeline = redis.pipeline();
   let maxWords = 1;
   let stored = 0;
+  const now = new Date().toISOString();
 
   for (const det of detections) {
     const hash = hashValue(det.text);
-    const wordCount = det.text.split(/\s+/).length;
-    const anonToken = tokenMap.get(normalize(det.text)) || `[${det.category.toUpperCase()}_${hash.slice(0, 6)}]`;
+    const tokenCount = det.text.split(/\s+/).length;
+
+    // Check if entry already exists (update lastSeenAt if so)
+    const existing = await redis.hget(`fp:${orgId}`, hash);
+    if (existing) {
+      try {
+        const parsed = JSON.parse(existing);
+        parsed.lastSeenAt = now;
+        pipeline.hset(`fp:${orgId}`, hash, JSON.stringify(parsed));
+      } catch { /* skip */ }
+      continue;
+    }
 
     const entry: FingerprintEntry = {
-      token: anonToken,
       type: det.category,
-      words: wordCount,
-      score: 0.9,
-      source,
-      createdAt: new Date().toISOString(),
+      tokenCount,
+      createdAt: now,
+      lastSeenAt: now,
     };
 
     if (STORAGE_MODE === 'debug') {
@@ -126,11 +123,10 @@ export async function storeDetections(
     pipeline.hset(`fp:${orgId}`, hash, JSON.stringify(entry));
     stored++;
 
-    if (wordCount > maxWords) maxWords = wordCount;
+    if (tokenCount > maxWords) maxWords = tokenCount;
   }
 
   if (maxWords > 1) {
-    // Only update if higher than current
     const current = await redis.get(`fp:${orgId}:maxWords`);
     if (!current || parseInt(current) < maxWords) {
       pipeline.set(`fp:${orgId}:maxWords`, maxWords.toString());
@@ -141,13 +137,14 @@ export async function storeDetections(
   pipeline.expire(`fp:${orgId}`, FINGERPRINT_TTL);
 
   // Update metrics
-  pipeline.hincrby(`vault_metrics:${orgId}`, 'total_stored', stored);
-  pipeline.hset(`vault_metrics:${orgId}`, 'last_store_at', new Date().toISOString());
+  if (stored > 0) {
+    pipeline.hincrby(`vault_metrics:${orgId}`, 'total_stored', stored);
+    pipeline.hset(`vault_metrics:${orgId}`, 'last_store_at', now);
 
-  // Track new-today count (sorted set with 24h TTL)
-  const now = Date.now();
-  pipeline.zadd(`vault_new:${orgId}`, now.toString(), `${now}-${stored}`);
-  pipeline.expire(`vault_new:${orgId}`, 86400);
+    const nowMs = Date.now();
+    pipeline.zadd(`vault_new:${orgId}`, nowMs.toString(), `${nowMs}-${stored}`);
+    pipeline.expire(`vault_new:${orgId}`, 86400);
+  }
 
   await pipeline.exec();
   return stored;
@@ -191,13 +188,12 @@ export async function getVaultStats(orgId: string): Promise<VaultStats> {
   const now = Date.now();
   const dayAgo = now - 86400000;
 
-  const [fpLen, metrics, hits24h, misses24h, newToday, memInfo] = await Promise.all([
+  const [fpLen, metrics, hits24h, misses24h, newToday] = await Promise.all([
     redis.hlen(`fp:${orgId}`),
     redis.hgetall(`vault_metrics:${orgId}`),
     redis.zcount(`vault_hits:${orgId}`, dayAgo, '+inf'),
     redis.zcount(`vault_misses:${orgId}`, dayAgo, '+inf'),
     redis.zcount(`vault_new:${orgId}`, dayAgo, '+inf'),
-    redis.memory('USAGE', `fp:${orgId}`).catch(() => 0),
   ]);
 
   // Count by category
@@ -221,7 +217,6 @@ export async function getVaultStats(orgId: string): Promise<VaultStats> {
   return {
     totalFingerprints: fpLen,
     storageMode: STORAGE_MODE,
-    storageBytes: (memInfo as number) || 0,
     totalLookups: parseInt(metrics?.total_lookups || '0'),
     totalHits: parseInt(metrics?.total_hits || '0'),
     totalMisses: parseInt(metrics?.total_misses || '0'),
@@ -242,13 +237,11 @@ export async function listDetections(
   page: number = 1,
   limit: number = 50,
   category?: string,
-  source?: string,
 ): Promise<VaultListResult> {
   if (!redis) {
     return { detections: [], total: 0, page, storageMode: STORAGE_MODE };
   }
 
-  // Scan all entries (Redis HSCAN doesn't support offset natively)
   const all: Array<FingerprintEntry & { hash: string }> = [];
   let cursor = '0';
   do {
@@ -258,14 +251,13 @@ export async function listDetections(
       try {
         const entry: FingerprintEntry = JSON.parse(fields[i + 1]);
         if (category && entry.type !== category) continue;
-        if (source && entry.source !== source) continue;
         all.push({ ...entry, hash: fields[i] });
       } catch { /* skip */ }
     }
   } while (cursor !== '0');
 
-  // Sort by createdAt descending
-  all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  // Sort by lastSeenAt descending
+  all.sort((a, b) => new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime());
 
   const start = (page - 1) * limit;
   const detections = all.slice(start, start + limit);
@@ -286,7 +278,6 @@ function emptyStats(): VaultStats {
   return {
     totalFingerprints: 0,
     storageMode: STORAGE_MODE,
-    storageBytes: 0,
     totalLookups: 0,
     totalHits: 0,
     totalMisses: 0,

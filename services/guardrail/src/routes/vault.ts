@@ -37,9 +37,8 @@ export function vaultRoutes(logger: Logger): Router {
       const page = parseInt((req.query.page as string) || '1');
       const limit = Math.min(parseInt((req.query.limit as string) || '50'), 200);
       const category = (req.query.category as string) || undefined;
-      const source = (req.query.source as string) || undefined;
 
-      const result = await listDetections(orgId, page, limit, category, source);
+      const result = await listDetections(orgId, page, limit, category);
       res.json(result);
     }),
   );
