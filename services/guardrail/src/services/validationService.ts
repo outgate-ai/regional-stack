@@ -308,7 +308,7 @@ export class ValidationService {
       if (allDetections.length > 0) {
         const orgId = (request.headers?.['x-organization-id'] as string) || organizationId || '';
         if (orgId) {
-          storeDetections(orgId, allDetections, result.anonymization_map, 'llm')
+          storeDetections(orgId, allDetections, result.anonymization_map)
             .then((count) => {
               if (count > 0) this.logger.debug({ orgId, stored: count }, 'Fingerprints stored');
             })
