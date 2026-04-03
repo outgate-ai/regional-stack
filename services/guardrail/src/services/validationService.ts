@@ -79,11 +79,18 @@ export class ValidationService {
     return this.config;
   }
 
-  private buildConsolidatedSystemPrompt(): string {
-    // Consolidate all prompts into a single system message for better LLM comprehension
-    const categoryPromptsText = Array.from(this.categoryPrompts.values()).join('\n\n');
+  private buildConsolidatedSystemPrompt(enabledCategories?: RiskCategory[]): string {
+    // Filter to only enabled categories if specified
+    let prompts: string[];
+    if (enabledCategories && enabledCategories.length > 0) {
+      prompts = enabledCategories
+        .map(cat => this.categoryPrompts.get(cat))
+        .filter((p): p is string => !!p);
+    } else {
+      prompts = Array.from(this.categoryPrompts.values());
+    }
 
-    // Replace template placeholder with actual category prompts
+    const categoryPromptsText = prompts.join('\n\n');
     return this.systemPrompt.replace('{{CATEGORY_PROMPTS}}', categoryPromptsText);
   }
 
@@ -199,7 +206,7 @@ export class ValidationService {
     }
   }
 
-  async detectVulnerabilities(request: ValidationRequest): Promise<Detection[]> {
+  async detectVulnerabilities(request: ValidationRequest, enabledCategories?: RiskCategory[]): Promise<Detection[]> {
     const rawBody =
       typeof request.body === 'string' ? request.body : JSON.stringify(request.body || {});
 
@@ -209,8 +216,8 @@ export class ValidationService {
     // Wrap content in analysis tags to prevent prompt confusion
     const wrappedContent = `<content_to_analyze>\n${userContent}\n</content_to_analyze>`;
 
-    // Build single consolidated system message with all prompts and instructions
-    const consolidatedSystemPrompt = this.buildConsolidatedSystemPrompt();
+    // Build system message with only enabled category prompts
+    const consolidatedSystemPrompt = this.buildConsolidatedSystemPrompt(enabledCategories);
 
     // Send system prompt as system message, wrapped content as user message
     return this.parseAllDetections(await this.llmClient.query([consolidatedSystemPrompt], wrappedContent));
@@ -235,10 +242,11 @@ export class ValidationService {
         }
       }
 
-      const allDetections = await this.detectVulnerabilities(request);
-
-      // Load dynamic policy config if a custom policyId is provided
+      // Load policy config BEFORE LLM call — only send prompts for enabled categories
       const policyConfig = policyId ? await this.loadPolicyConfig(policyId, organizationId || '') : this.config;
+      const enabledCategories = Object.keys(policyConfig.riskCategories) as RiskCategory[];
+
+      const allDetections = await this.detectVulnerabilities(request, enabledCategories);
 
       this.logger.debug(
         { providerId: request.providerId, detectionsCount: allDetections.length },
