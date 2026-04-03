@@ -8,4 +8,21 @@ Detect confidential business information:
 - Employee/customer databases
 - Competitive intelligence marked as confidential
 
-You should **NOT** detect relative or absolute file system paths such as /home/tux/example.txt or ~/tux/example.txt
+You should **NOT** detect:
+- Relative or absolute file system paths such as /home/tux/example.txt or ~/tux/example.txt
+- Generic code comments or documentation
+
+Note: The input content will have role prefixes like [user], [system], [assistant]. These are structural markers — do NOT include them in extracted text.
+
+EXAMPLES:
+- Input:
+  <content_to_analyze>
+  [user] Here is the Q3 revenue report (CONFIDENTIAL): Total revenue $12.5M, EBITDA $3.2M, churn rate 4.7%.
+  </content_to_analyze>
+  Output: [{"text": "Q3 revenue report (CONFIDENTIAL): Total revenue $12.5M, EBITDA $3.2M, churn rate 4.7%", "category": "sensitive_data"}]
+
+- Input:
+  <content_to_analyze>
+  [user] Read the README.md file
+  </content_to_analyze>
+  Output: []

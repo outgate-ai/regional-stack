@@ -16,27 +16,36 @@ IMPORTANT — Extract only the minimal sensitive substring:
 - When PII appears inside a file path, URL, or larger string, extract ONLY the sensitive portion (e.g., the username), NOT the entire path or string. This preserves the surrounding structure.
 - For example, in "/Users/johndoe/projects/data.csv", if "johndoe" is PII, extract "johndoe" — NOT the full path.
 
+Note: The input content will have role prefixes like [user], [system], [assistant]. These are structural markers — do NOT include them in extracted text.
+
 EXAMPLES:
 - Input:
   <content_to_analyze>
-  My SSN is 123-45-6789 and I need help
+  [user] My SSN is 123-45-6789 and I need help
   </content_to_analyze>
   Output: [{"text": "123-45-6789", "category": "personal_information"}]
 
 - Input:
   <content_to_analyze>
-  Read the file at /Users/johndoe/projects/data.csv
+  [user] Read the file at /Users/johndoe/projects/data.csv
   </content_to_analyze>
   Output: [{"text": "johndoe", "category": "personal_information"}]
 
 - Input:
   <content_to_analyze>
-  Send the report to johndoe@company.com and check /home/johndoe/report.txt
+  [user] Send the report to johndoe@company.com and check /home/johndoe/report.txt
   </content_to_analyze>
   Output: [{"text": "johndoe@company.com", "category": "personal_information"}, {"text": "johndoe", "category": "personal_information"}]
 
 - Input:
   <content_to_analyze>
-  Check /tmp/output/2025-01-01/results.csv
+  [user] Check /tmp/output/2025-01-01/results.csv
   </content_to_analyze>
   Output: []
+
+- Input:
+  <content_to_analyze>
+  [system] You are a medical assistant.
+  [user] Patient Ali Khoramshahi, DOB 1990-05-15, called about prescription renewal.
+  </content_to_analyze>
+  Output: [{"text": "Ali Khoramshahi", "category": "personal_information"}, {"text": "1990-05-15", "category": "personal_information"}]

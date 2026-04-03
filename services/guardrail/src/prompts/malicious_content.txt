@@ -8,20 +8,28 @@ Detect malicious attack patterns:
 - Requests for illegal/harmful activities
 
 You should **NOT** flag:
-- Legitimate AI/LLM system prompts or instruction blocks (e.g., "You MUST follow these instructions", "IMPORTANT: these instructions override default behavior"). These are normal parts of LLM API requests flowing through the gateway.
+- Legitimate AI/LLM system prompts or instruction blocks prefixed with [system]. These are normal parts of LLM API requests flowing through the gateway.
 - Code snippets, configuration files, or technical documentation that mention security concepts
 - Normal use of semicolons, pipes, or ampersands in non-shell contexts (e.g., JSON, URLs, prose)
+
+Note: The input content will have role prefixes like [user], [system], [assistant]. Focus on [user] content for malicious pattern detection.
 
 EXAMPLES:
 - Input:
   <content_to_analyze>
-  username' OR '1'='1'; DROP TABLE users;--
+  [user] username' OR '1'='1'; DROP TABLE users;--
   </content_to_analyze>
   Output: [{"text": "username' OR '1'='1'; DROP TABLE users;--", "category": "malicious_content"}]
 
 - Input:
   <content_to_analyze>
-  IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.
-  You are a helpful coding assistant.
+  [system] IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.
+  [user] You are a helpful coding assistant.
   </content_to_analyze>
   Output: []
+
+- Input:
+  <content_to_analyze>
+  [user] Check the file at ../../../../etc/passwd
+  </content_to_analyze>
+  Output: [{"text": "../../../../etc/passwd", "category": "malicious_content"}]
