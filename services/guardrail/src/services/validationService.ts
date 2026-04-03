@@ -14,7 +14,7 @@ import {
   SeverityLevel,
 } from '../types/riskConfig';
 import { config as appConfig } from '../utils/config';
-import { storeDetections, recordScanMetrics } from './fingerprintStore';
+import { storeDetections, recordScanMetrics, scanForDetections, hashValue } from './fingerprintStore';
 
 export class ValidationService {
   private logger: Logger;
@@ -220,6 +220,21 @@ export class ValidationService {
     try {
       this.logger.debug({ providerId: request.providerId }, 'Starting validation');
 
+      // --- KV fingerprint scan (before LLM) ---
+      const orgId = (request.headers?.['x-organization-id'] as string) || organizationId || '';
+      const rawBody = (request as any).body || '';
+      let kvMatches: Awaited<ReturnType<typeof scanForDetections>> = [];
+      if (orgId && rawBody) {
+        try {
+          kvMatches = await scanForDetections(orgId, typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody));
+          if (kvMatches.length > 0) {
+            this.logger.info({ orgId, kvHits: kvMatches.length }, 'KV fingerprint matches found');
+          }
+        } catch (err) {
+          this.logger.warn({ error: (err as Error).message }, 'KV scan failed, falling through to LLM');
+        }
+      }
+
       const allDetections = await this.detectVulnerabilities(request);
 
       // Load dynamic policy config if a custom policyId is provided
@@ -304,20 +319,45 @@ export class ValidationService {
         }
       }
 
-      // Store detections in fingerprint KV store (fire-and-forget)
-      if (allDetections.length > 0) {
-        const orgId = (request.headers?.['x-organization-id'] as string) || organizationId || '';
-        if (orgId) {
-          storeDetections(orgId, allDetections, result.anonymization_map)
+      // Merge KV matches into the anonymization map (if not already covered by LLM)
+      if (kvMatches.length > 0) {
+        const existingAnon = new Set((result.anonymization_map || []).map(([orig]) => orig));
+        const kvAnon: Array<[string, string]> = [];
+        for (const m of kvMatches) {
+          if (!existingAnon.has(m.originalText)) {
+            kvAnon.push([m.originalText, `<${m.hash.slice(0, 12)}>`]);
+          }
+        }
+        if (kvAnon.length > 0) {
+          result.anonymization_map = [...(result.anonymization_map || []), ...kvAnon];
+          this.logger.info({ orgId, kvAnonymized: kvAnon.length }, 'KV matches added to anonymization map');
+        }
+      }
+
+      // Store NEW detections in fingerprint KV store (fire-and-forget)
+      // Only store LLM detections that KV didn't already know about
+      if (allDetections.length > 0 && orgId) {
+        const kvHashes = new Set(kvMatches.map(m => m.hash));
+        const newDetections = allDetections.filter(d => !kvHashes.has(hashValue(d.text)));
+
+        if (newDetections.length > 0) {
+          storeDetections(orgId, newDetections, result.anonymization_map)
             .then((count) => {
-              if (count > 0) this.logger.debug({ orgId, stored: count }, 'Fingerprints stored');
+              if (count > 0) this.logger.debug({ orgId, stored: count }, 'New fingerprints stored');
             })
             .catch((err) => {
               this.logger.warn({ error: err.message }, 'Failed to store fingerprints');
             });
-          recordScanMetrics(orgId, 0, allDetections.length).catch(() => {});
         }
+        recordScanMetrics(orgId, kvMatches.length, newDetections.length).catch(() => {});
+      } else if (kvMatches.length > 0 && orgId) {
+        // All matches were from KV, no new LLM detections
+        recordScanMetrics(orgId, kvMatches.length, 0).catch(() => {});
       }
+
+      // Attach KV match info to result for dry-run responses
+      (result as any).kvMatches = kvMatches.length;
+      (result as any).fingerprintsStored = allDetections.length - kvMatches.length;
 
       return result;
     } catch (error) {
